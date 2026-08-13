@@ -626,17 +626,14 @@ const geoText = document.getElementById('geotext');
 
 async function getCachedCoord(addrKey){
   try{
-    const res = await window.storage.get('geocode:' + addrKey, true);
-    if(res && res.value){
-      const v = JSON.parse(res.value);
-      return v;
-    }
+    const raw = localStorage.getItem('catmap_geocode:' + addrKey);
+    if(raw) return JSON.parse(raw);
   }catch(e){}
   return null;
 }
 async function setCachedCoord(addrKey, coord){
   try{
-    await window.storage.set('geocode:' + addrKey, JSON.stringify(coord), true);
+    localStorage.setItem('catmap_geocode:' + addrKey, JSON.stringify(coord));
   }catch(e){}
 }
 
