@@ -392,11 +392,16 @@ async function loadData(){
       const addr = addrRaw || null;
       const zip = zipRaw || null;
       const addrKey = (addr && zip) ? (addr + ', ' + zip + ', KS') : null;
+      const latRaw = parseFloat(row['Lat']);
+      const lngRaw = parseFloat(row['Lng']);
+      const hasCoord = !isNaN(latRaw) && !isNaN(lngRaw) && latRaw !== 0 && lngRaw !== 0;
       records.push({
         id: i,
         address: addr,
         zip: zip,
         addrKey: addrKey,
+        lat: hasCoord ? latRaw : null,
+        lng: hasCoord ? lngRaw : null,
         date: parseDateJS(row['Date']),
         trapNumber: (row['TrapNumber']||'').toString().trim() || null,
         sex: cleanSexJS(row['Sex']),
@@ -434,7 +439,12 @@ function buildColonies(records){
     if(!map.has(r.addrKey)){
       map.set(r.addrKey, {addrKey:r.addrKey, address:r.address, zip:r.zip, cats:[], lat:null, lng:null});
     }
-    map.get(r.addrKey).cats.push(r);
+    const colony = map.get(r.addrKey);
+    colony.cats.push(r);
+    if(colony.lat==null && r.lat!=null && r.lng!=null){
+      colony.lat = r.lat;
+      colony.lng = r.lng;
+    }
   });
   return {colonies:Array.from(map.values()), noLoc};
 }
@@ -640,39 +650,6 @@ async function setCachedCoord(addrKey, coord){
 // primary geocoder: US Census Bureau batch API (free, no key, handles thousands per request)
 // fallback geocoder: Nominatim/OpenStreetMap, one address at a time (rate-limited to 1/sec)
 
-async function geocodeBatchCensus(colonyBatch){
-  // build a CSV: id,street,city,state,zip  (id = index into colonyBatch)
-  const lines = colonyBatch.map((c,i)=>{
-    const street = c.address.replace(/[",]/g,'');
-    return [i, street, '', 'KS', c.zip].join(',');
-  });
-  const csv = lines.join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const form = new FormData();
-  form.append('addressFile', blob, 'addresses.csv');
-  form.append('benchmark', 'Public_AR_Current');
-
-  const resp = await fetch('https://geocoding.geo.census.gov/geocoder/locations/addressbatch', {
-    method:'POST',
-    body: form
-  });
-  if(!resp.ok) throw new Error('census batch http ' + resp.status);
-  const text = await resp.text();
-  const parsed = Papa.parse(text, {header:false, skipEmptyLines:true});
-  const results = new Map(); // index -> {lat,lng} or null
-  parsed.data.forEach(row=>{
-    const idx = parseInt(row[0], 10);
-    const matched = row[2] === 'Match';
-    if(matched && row[5]){
-      const [lon, lat] = row[5].split(',').map(parseFloat);
-      results.set(idx, {lat, lng:lon});
-    } else {
-      results.set(idx, null);
-    }
-  });
-  return results;
-}
-
 async function geocodeAddressNominatim(addrKey){
   const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=' + encodeURIComponent(addrKey);
   try{
@@ -702,63 +679,25 @@ async function geocodeAll(){
   if(toGeocode.length===0) return;
 
   geoStatusEl.classList.add('show');
-  geoText.textContent = 'Locating ' + toGeocode.length + ' new address' + (toGeocode.length===1?'':'es') + ' on the map\u2026';
+  geoText.textContent = 'Locating ' + toGeocode.length + ' new address' + (toGeocode.length===1?'':'es') + ' on the map…';
   geoBarFill.style.width = '0%';
   geoPct.textContent = '0%';
 
-  let censusWorked = true;
-  const stillNeeded = [];
-  const BATCH_SIZE = 500;
-  let done = 0;
-
-  for(let start=0; start<toGeocode.length; start+=BATCH_SIZE){
-    const batch = toGeocode.slice(start, start+BATCH_SIZE);
-    if(censusWorked){
-      try{
-        const results = await geocodeBatchCensus(batch);
-        for(let i=0;i<batch.length;i++){
-          const r = results.get(i);
-          const colony = batch[i];
-          if(r){
-            colony.lat = r.lat; colony.lng = r.lng;
-            await setCachedCoord(colony.addrKey, {lat:r.lat, lng:r.lng, failed:false});
-          } else {
-            stillNeeded.push(colony);
-          }
-        }
-      }catch(e){
-        censusWorked = false;
-        batch.forEach(c=>stillNeeded.push(c));
-      }
-    } else {
-      batch.forEach(c=>stillNeeded.push(c));
+  for(let i=0;i<toGeocode.length;i++){
+    const colony = toGeocode[i];
+    const result = await geocodeAddressNominatim(colony.addrKey);
+    await setCachedCoord(colony.addrKey, result);
+    if(!result.failed){
+      colony.lat = result.lat;
+      colony.lng = result.lng;
     }
-    done += batch.length;
-    const pct = Math.round((done/toGeocode.length)*70);
+    const pct = Math.round(((i+1)/toGeocode.length)*100);
     geoBarFill.style.width = pct + '%';
     geoPct.textContent = pct + '%';
-    applyFilters();
-  }
-
-  // fallback for anything Census couldn't match
-  if(stillNeeded.length){
-    geoText.textContent = 'Double-checking ' + stillNeeded.length + ' address' + (stillNeeded.length===1?'':'es') + ' that needed a closer look\u2026';
-    for(let i=0;i<stillNeeded.length;i++){
-      const colony = stillNeeded[i];
-      const result = await geocodeAddressNominatim(colony.addrKey);
-      await setCachedCoord(colony.addrKey, result);
-      if(!result.failed){
-        colony.lat = result.lat;
-        colony.lng = result.lng;
-      }
-      const pct = 70 + Math.round(((i+1)/stillNeeded.length)*30);
-      geoBarFill.style.width = pct + '%';
-      geoPct.textContent = pct + '%';
-      if((i+1) % 5 === 0 || i === stillNeeded.length-1){
-        applyFilters();
-      }
-      await new Promise(r=>setTimeout(r, 1100));
+    if((i+1) % 5 === 0 || i === toGeocode.length-1){
+      applyFilters();
     }
+    await new Promise(r=>setTimeout(r, 1100));
   }
 
   geoStatusEl.classList.remove('show');
