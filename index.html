@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Community Cat Colony Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
+<style>
+  :root{
+    --ink:#20302a;
+    --ink-soft:#4d5d55;
+    --paper:#f6f4ee;
+    --card:#ffffff;
+    --line:#d8d3c4;
+    --moss:#3f6b4f;
+    --moss-dark:#2c4b38;
+    --moss-light:#e5ede7;
+    --clay:#b6602f;
+    --clay-light:#f3e2d3;
+    --male:#4c7fb5;
+    --female:#b5527a;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+  }
+  #app{display:flex;flex-direction:column;height:100vh;min-height:640px;}
+
+  header{
+    padding:14px 20px;
+    background:var(--moss-dark);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  header h1{
+    font-size:18px;
+    margin:0;
+    font-weight:600;
+    letter-spacing:0.2px;
+  }
+  header .subtitle{
+    font-size:12.5px;
+    color:#cfe0d5;
+    margin-top:2px;
+  }
+  .stat-row{display:flex;gap:16px;}
+  .stat{
+    text-align:right;
+  }
+  .stat .num{font-size:18px;font-weight:700;line-height:1.1;}
+  .stat .lbl{font-size:11px;color:#cfe0d5;text-transform:uppercase;letter-spacing:0.4px;}
+
+  #geostatus{
+    background:var(--clay-light);
+    color:#6b3a17;
+    font-size:12.5px;
+    padding:6px 20px;
+    display:none;
+    align-items:center;
+    gap:10px;
+  }
+  #geostatus.show{display:flex;}
+  #geobar{
+    flex:1;
+    height:6px;
+    background:#e9d2bb;
+    border-radius:3px;
+    overflow:hidden;
+    max-width:220px;
+  }
+  #geobar-fill{
+    height:100%;
+    width:0%;
+    background:var(--clay);
+    transition:width .2s ease;
+  }
+
+  main{
+    flex:1;
+    display:flex;
+    min-height:0;
+  }
+
+  #sidebar{
+    width:340px;
+    min-width:340px;
+    background:var(--card);
+    border-right:1px solid var(--line);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  #filters{
+    padding:14px 16px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  #filters .field-label{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+    color:var(--ink-soft);
+    margin-bottom:4px;
+    display:block;
+  }
+  #filters input[type=text], #filters select, #filters input[type=date]{
+    width:100%;
+    padding:7px 9px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    font-size:13.5px;
+    background:#fff;
+    color:var(--ink);
+  }
+  .row2{display:flex;gap:8px;}
+  .row2 > div{flex:1;}
+  #resultcount{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    padding:8px 16px 4px;
+  }
+  #resetbtn{
+    background:none;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:5px 10px;
+    font-size:12px;
+    color:var(--moss-dark);
+    cursor:pointer;
+  }
+  #resetbtn:hover{background:var(--moss-light);}
+
+  #list{
+    flex:1;
+    overflow-y:auto;
+  }
+  .colony-card{
+    padding:10px 16px;
+    border-bottom:1px solid var(--line);
+    cursor:pointer;
+  }
+  .colony-card:hover{background:var(--moss-light);}
+  .colony-card.active{background:var(--moss-light);border-left:3px solid var(--moss);}
+  .colony-addr{
+    font-size:13.5px;
+    font-weight:600;
+    color:var(--ink);
+  }
+  .colony-meta{
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-top:2px;
+  }
+  .colony-count{
+    display:inline-block;
+    background:var(--moss);
+    color:#fff;
+    border-radius:10px;
+    font-size:11px;
+    padding:1px 8px;
+    margin-left:6px;
+  }
+
+  #map{
+    flex:1;
+    min-width:0;
+  }
+
+  .cat-pill{
+    display:inline-block;
+    font-size:11px;
+    padding:1px 7px;
+    border-radius:9px;
+    margin:0 4px 4px 0;
+  }
+  .pill-male{background:#e4edf6;color:var(--male);}
+  .pill-female{background:#f6e4ec;color:var(--female);}
+  .pill-unk{background:#eee;color:#777;}
+
+  .popup-title{font-weight:700;font-size:13.5px;margin-bottom:4px;}
+  .popup-sub{font-size:12px;color:var(--ink-soft);margin-bottom:6px;}
+  .popup-cat{
+    font-size:12px;
+    border-top:1px solid var(--line);
+    padding:5px 0;
+  }
+  .popup-cat:first-of-type{border-top:none;}
+  .popup-list{max-height:220px;overflow-y:auto;padding-right:4px;}
+
+  .needs-loc{
+    background:#fbeee6;
+    border-top:1px solid var(--line);
+    padding:10px 16px;
+    font-size:12px;
+    color:#8a4a24;
+  }
+
+  @media (max-width: 760px){
+    #sidebar{position:absolute;z-index:500;height:100%;box-shadow:2px 0 8px rgba(0,0,0,0.15);transform:translateX(-100%);transition:transform .2s ease;}
+    #sidebar.open{transform:translateX(0);}
+    #togglesidebar{display:inline-flex !important;}
+  }
+  #togglesidebar{
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:6px;
+    width:34px;height:34px;
+    cursor:pointer;
+    font-size:16px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="togglesidebar" title="Show list">&#9776;</button>
+      <div>
+        <h1>Community cat colony map</h1>
+        <div class="subtitle">Trap-neuter-return records by location</div>
+      </div>
+    </div>
+    <div class="stat-row">
+      <div class="stat"><div class="num" id="stat-cats">0</div><div class="lbl">Cats</div></div>
+      <div class="stat"><div class="num" id="stat-colonies">0</div><div class="lbl">Locations</div></div>
+      <div class="stat"><div class="num" id="stat-shown">0</div><div class="lbl">Shown</div></div>
+    </div>
+  </header>
+
+  <div id="geostatus">
+    <span id="geotext">Locating addresses on the map&hellip;</span>
+    <div id="geobar"><div id="geobar-fill"></div></div>
+    <span id="geopct">0%</span>
+  </div>
+
+  <div id="loaderror" style="display:none; background:#fbeee6; color:#8a2f0f; padding:10px 20px; font-size:13.5px; border-bottom:1px solid #d8d3c4;">
+    Couldn't load data from the Google Sheet after several attempts. This is usually temporary — try refreshing in a minute. If it keeps happening, let Ben know.
+  </div>
+
+  <main>
+    <div id="sidebar">
+      <div id="filters">
+        <div>
+          <span class="field-label">Search address</span>
+          <input type="text" id="f-search" placeholder="e.g. Monroe, Sardou&hellip;">
+        </div>
+        <div class="row2">
+          <div>
+            <span class="field-label">Sex</span>
+            <select id="f-sex">
+              <option value="">All</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Unknown">Unknown</option>
+            </select>
+          </div>
+          <div>
+            <span class="field-label">Age class</span>
+            <select id="f-age">
+              <option value="">All</option>
+              <option value="Kitten">Kitten</option>
+              <option value="Juvenile">Juvenile</option>
+              <option value="Adult">Adult</option>
+              <option value="Unknown">Unknown</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <span class="field-label">Year</span>
+            <select id="f-year">
+              <option value="">All years</option>
+            </select>
+          </div>
+          <div>
+            <span class="field-label">Fixed by</span>
+            <select id="f-org">
+              <option value="">All</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <span class="field-label">Sort by</span>
+            <select id="f-sort">
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="count-desc">Most cats</option>
+              <option value="addr-asc">Address A&ndash;Z</option>
+            </select>
+          </div>
+          <div>
+            <span class="field-label">Found after</span>
+            <input type="date" id="f-datefrom">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <span class="field-label">Found before</span>
+            <input type="date" id="f-dateto">
+          </div>
+          <div></div>
+        </div>
+        <button id="resetbtn">Reset filters</button>
+      </div>
+      <div id="resultcount">Loading&hellip;</div>
+      <div id="list"></div>
+      <div id="needsloc" class="needs-loc" style="display:none;"></div>
+    </div>
+    <div id="map"></div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script>
+const SHEET_ID = "1lYheC94CZjoCUpt6OaJVq9FP8sX60fwSMT65qjbS6LI";
+const SHEET_GID = "748217217";
+
+let RAW_RECORDS = [];
+
+function cleanSexJS(v){
+  if(!v) return 'Unknown';
+  v = String(v).trim().toLowerCase();
+  if(['m','am','m adult'].includes(v)) return 'Male';
+  if(['f','pg'].includes(v)) return 'Female';
+  return 'Unknown';
+}
+function cleanAgeJS(v){
+  if(!v) return 'Unknown';
+  v = String(v).trim().toLowerCase();
+  if(!v) return 'Unknown';
+  if(v.startsWith('kit')) return 'Kitten';
+  if(v.startsWith('adol') || v.startsWith('juv') || v.startsWith('youth')) return 'Juvenile';
+  if(v.startsWith('ad') || v.startsWith('`ad')) return 'Adult';
+  let m = v.match(/^([\d.]+)\s*mo/);
+  if(m){ const months = parseFloat(m[1]); return months <= 3 ? 'Kitten' : (months <= 8 ? 'Juvenile' : 'Adult'); }
+  m = v.match(/^([\d.]+)\s*yr/);
+  if(m){ const yrs = parseFloat(m[1]); return yrs < 1 ? 'Juvenile' : 'Adult'; }
+  return 'Unknown';
+}
+function cleanOrgJS(v){
+  if(!v) return null;
+  v = String(v).trim();
+  if(!v) return null;
+  const map = {fouse:'Fouse', gah:'GAH', hhhs:'HHHS', ksu:'KSU', heidi:'Heidi', gpspca:'GPSPCA'};
+  const key = v.toLowerCase();
+  return map[key] || v;
+}
+function parseDateJS(v){
+  if(!v) return null;
+  v = String(v).trim();
+  if(!v) return null;
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if(m){
+    let mo = m[1], day = m[2], yr = m[3];
+    if(yr.length===2) yr = '20'+yr;
+    return yr + '-' + mo.padStart(2,'0') + '-' + day.padStart(2,'0');
+  }
+  const d = new Date(v);
+  if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+  return null;
+}
+
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzuSYwqJo_BNAOAWwUHe3Kq-m9iS4p2ZMzDiuZhzK6l_xqUBFBAafWOFi3XHJ6oaCVe/exec";
+
+async function loadData(){
+  try{
+    const res = await fetch(APPS_SCRIPT_URL);
+    if(!res.ok){ console.error('Cat map: Apps Script returned status', res.status); return []; }
+    const rows = await res.json();
+    if(!Array.isArray(rows) || rows.length === 0){ console.error('Cat map: Apps Script returned no rows'); return []; }
+    const records = [];
+    rows.forEach((row, i)=>{
+      const addrRaw = (row['Address']||'').toString().trim();
+      const zipRaw = (row['Zip']||'').toString().trim().replace(/\.0$/,'');
+      const addr = addrRaw || null;
+      const zip = zipRaw || null;
+      const addrKey = (addr && zip) ? (addr + ', ' + zip + ', KS') : null;
+      records.push({
+        id: i,
+        address: addr,
+        zip: zip,
+        addrKey: addrKey,
+        date: parseDateJS(row['Date']),
+        trapNumber: (row['TrapNumber']||'').toString().trim() || null,
+        sex: cleanSexJS(row['Sex']),
+        ageClass: cleanAgeJS(row['AgeClass']),
+        mass: (row['Mass']||'').toString().trim() || null,
+        description: (row['Cat Description']||'').toString().trim() || null,
+        fixedBy: cleanOrgJS(row['Who Fixed Cat?']),
+        notes: (row['Notes']||'').toString().trim() || null
+      });
+    });
+    console.log('Cat map: loaded', records.length, 'records from Apps Script');
+    return records;
+  }catch(e){
+    console.error('Cat map: failed to load from Apps Script', e.message);
+    return [];
+  }
+}
+
+
+// ---- group into colonies by address key ----
+async function initApp(){
+document.getElementById('resultcount').textContent = 'Loading data from Google Sheet…';
+RAW_RECORDS = await loadData();
+if(RAW_RECORDS.length === 0){
+  document.getElementById('resultcount').textContent = 'No data loaded.';
+  document.getElementById('loaderror').style.display = 'block';
+  return;
+}
+
+function buildColonies(records){
+  const map = new Map();
+  const noLoc = [];
+  records.forEach(r=>{
+    if(!r.addrKey){ noLoc.push(r); return; }
+    if(!map.has(r.addrKey)){
+      map.set(r.addrKey, {addrKey:r.addrKey, address:r.address, zip:r.zip, cats:[], lat:null, lng:null});
+    }
+    map.get(r.addrKey).cats.push(r);
+  });
+  return {colonies:Array.from(map.values()), noLoc};
+}
+const {colonies, noLoc} = buildColonies(RAW_RECORDS);
+
+document.getElementById('stat-cats').textContent = RAW_RECORDS.length.toLocaleString();
+document.getElementById('stat-colonies').textContent = colonies.length.toLocaleString();
+
+if(noLoc.length){
+  const el = document.getElementById('needsloc');
+  el.style.display = 'block';
+  el.textContent = noLoc.length + ' record' + (noLoc.length===1?'':'s') + ' have no address or zip on file and can\'t be placed on the map yet.';
+}
+
+// populate org filter
+const orgs = Array.from(new Set(RAW_RECORDS.map(r=>r.fixedBy).filter(Boolean))).sort();
+const orgSel = document.getElementById('f-org');
+orgs.forEach(o=>{
+  const opt = document.createElement('option');
+  opt.value = o; opt.textContent = o;
+  orgSel.appendChild(opt);
+});
+
+// populate year filter
+const years = Array.from(new Set(RAW_RECORDS.map(r=> r.date ? r.date.slice(0,4) : null).filter(Boolean))).sort().reverse();
+const yearSel = document.getElementById('f-year');
+years.forEach(y=>{
+  const opt = document.createElement('option');
+  opt.value = y; opt.textContent = y;
+  yearSel.appendChild(opt);
+});
+
+// ---- map setup ----
+const map = L.map('map', {zoomControl:true}).setView([39.05, -95.68], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom:19,
+  attribution:'&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+const clusterGroup = L.markerClusterGroup({maxClusterRadius:45});
+map.addLayer(clusterGroup);
+
+const markerByAddrKey = {};
+
+function sexPillClass(sex){
+  if(sex==='Male') return 'pill-male';
+  if(sex==='Female') return 'pill-female';
+  return 'pill-unk';
+}
+
+function popupHtml(colony){
+  let html = '<div class="popup-title">' + colony.address + '</div>';
+  html += '<div class="popup-sub">' + colony.cats.length + ' cat' + (colony.cats.length===1?'':'s') + ' recorded here</div>';
+  html += '<div class="popup-list">';
+  colony.cats.slice().sort((a,b)=> (b.date||'').localeCompare(a.date||'')).forEach(c=>{
+    html += '<div class="popup-cat">';
+    html += '<span class="cat-pill ' + sexPillClass(c.sex) + '">' + c.sex + '</span>';
+    html += '<span class="cat-pill pill-unk">' + c.ageClass + '</span>';
+    html += ' ' + (c.description || 'No description') + '<br>';
+    html += '<span style="color:#8a8578;">' + (c.date||'date unknown') + (c.fixedBy? ' &middot; fixed by '+c.fixedBy : '') + '</span>';
+    if(c.notes){ html += '<br><span style="color:#8a4a24;">' + c.notes + '</span>'; }
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderMarkers(list){
+  clusterGroup.clearLayers();
+  list.forEach(colony=>{
+    if(colony.lat==null || colony.lng==null) return;
+    const marker = L.marker([colony.lat, colony.lng]);
+    marker.bindPopup(popupHtml(colony));
+    marker._addrKey = colony.addrKey;
+    markerByAddrKey[colony.addrKey] = marker;
+    clusterGroup.addLayer(marker);
+  });
+}
+
+// ---- list rendering ----
+const listEl = document.getElementById('list');
+let activeCard = null;
+
+function renderList(list){
+  listEl.innerHTML = '';
+  document.getElementById('stat-shown').textContent = list.reduce((s,c)=>s+c.cats.length,0).toLocaleString();
+  document.getElementById('resultcount').textContent = list.length.toLocaleString() + ' location' + (list.length===1?'':'s') + ' shown';
+  list.forEach(colony=>{
+    const card = document.createElement('div');
+    card.className = 'colony-card';
+    const lastDate = colony.cats.reduce((max,c)=> (c.date && c.date>max) ? c.date : max, '');
+    card.innerHTML = '<div class="colony-addr">' + colony.address +
+      '<span class="colony-count">' + colony.cats.length + '</span></div>' +
+      '<div class="colony-meta">' + colony.zip + (lastDate? ' &middot; last found ' + lastDate : '') + '</div>';
+    card.addEventListener('click', ()=>{
+      if(activeCard) activeCard.classList.remove('active');
+      card.classList.add('active');
+      activeCard = card;
+      if(colony.lat!=null){
+        map.setView([colony.lat, colony.lng], 16, {animate:true});
+        const m = markerByAddrKey[colony.addrKey];
+        if(m){
+          if(clusterGroup.hasLayer(m)){
+            clusterGroup.zoomToShowLayer(m, ()=> m.openPopup());
+          } else {
+            m.openPopup();
+          }
+        }
+      }
+      if(window.innerWidth <= 760) document.getElementById('sidebar').classList.remove('open');
+    });
+    listEl.appendChild(card);
+  });
+}
+
+// ---- filtering ----
+function currentFilters(){
+  return {
+    search: document.getElementById('f-search').value.trim().toLowerCase(),
+    sex: document.getElementById('f-sex').value,
+    age: document.getElementById('f-age').value,
+    org: document.getElementById('f-org').value,
+    year: document.getElementById('f-year').value,
+    dateFrom: document.getElementById('f-datefrom').value,
+    dateTo: document.getElementById('f-dateto').value,
+    sort: document.getElementById('f-sort').value
+  };
+}
+
+function applyFilters(){
+  const f = currentFilters();
+  let filtered = colonies.map(colony=>{
+    const cats = colony.cats.filter(c=>{
+      if(f.sex && c.sex !== f.sex) return false;
+      if(f.age && c.ageClass !== f.age) return false;
+      if(f.org && c.fixedBy !== f.org) return false;
+      if(f.year && (!c.date || c.date.slice(0,4) !== f.year)) return false;
+      if(f.dateFrom && (!c.date || c.date < f.dateFrom)) return false;
+      if(f.dateTo && (!c.date || c.date > f.dateTo)) return false;
+      return true;
+    });
+    return {...colony, cats};
+  }).filter(colony=>{
+    if(colony.cats.length===0) return false;
+    if(f.search && !colony.address.toLowerCase().includes(f.search)) return false;
+    return true;
+  });
+
+  if(f.sort==='date-desc') filtered.sort((a,b)=>{
+    const da = a.cats.reduce((m,c)=>c.date>m?c.date:m,''); const db = b.cats.reduce((m,c)=>c.date>m?c.date:m,'');
+    return db.localeCompare(da);
+  });
+  else if(f.sort==='date-asc') filtered.sort((a,b)=>{
+    const da = a.cats.reduce((m,c)=>(!m||c.date<m)?c.date:m,'9999'); const db = b.cats.reduce((m,c)=>(!m||c.date<m)?c.date:m,'9999');
+    return da.localeCompare(db);
+  });
+  else if(f.sort==='count-desc') filtered.sort((a,b)=> b.cats.length - a.cats.length);
+  else if(f.sort==='addr-asc') filtered.sort((a,b)=> a.address.localeCompare(b.address));
+
+  renderMarkers(filtered);
+  renderList(filtered);
+}
+
+['f-search','f-sex','f-age','f-org','f-year','f-datefrom','f-dateto','f-sort'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', applyFilters);
+  document.getElementById(id).addEventListener('change', applyFilters);
+});
+document.getElementById('resetbtn').addEventListener('click', ()=>{
+  document.getElementById('f-search').value='';
+  document.getElementById('f-sex').value='';
+  document.getElementById('f-age').value='';
+  document.getElementById('f-org').value='';
+  document.getElementById('f-year').value='';
+  document.getElementById('f-datefrom').value='';
+  document.getElementById('f-dateto').value='';
+  document.getElementById('f-sort').value='date-desc';
+  applyFilters();
+});
+
+document.getElementById('togglesidebar').addEventListener('click', ()=>{
+  document.getElementById('sidebar').classList.toggle('open');
+});
+
+// ---- geocoding with persistent shared cache ----
+const geoStatusEl = document.getElementById('geostatus');
+const geoBarFill = document.getElementById('geobar-fill');
+const geoPct = document.getElementById('geopct');
+const geoText = document.getElementById('geotext');
+
+async function getCachedCoord(addrKey){
+  try{
+    const res = await window.storage.get('geocode:' + addrKey, true);
+    if(res && res.value){
+      const v = JSON.parse(res.value);
+      return v;
+    }
+  }catch(e){}
+  return null;
+}
+async function setCachedCoord(addrKey, coord){
+  try{
+    await window.storage.set('geocode:' + addrKey, JSON.stringify(coord), true);
+  }catch(e){}
+}
+
+// primary geocoder: US Census Bureau batch API (free, no key, handles thousands per request)
+// fallback geocoder: Nominatim/OpenStreetMap, one address at a time (rate-limited to 1/sec)
+
+async function geocodeBatchCensus(colonyBatch){
+  // build a CSV: id,street,city,state,zip  (id = index into colonyBatch)
+  const lines = colonyBatch.map((c,i)=>{
+    const street = c.address.replace(/[",]/g,'');
+    return [i, street, '', 'KS', c.zip].join(',');
+  });
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const form = new FormData();
+  form.append('addressFile', blob, 'addresses.csv');
+  form.append('benchmark', 'Public_AR_Current');
+
+  const resp = await fetch('https://geocoding.geo.census.gov/geocoder/locations/addressbatch', {
+    method:'POST',
+    body: form
+  });
+  if(!resp.ok) throw new Error('census batch http ' + resp.status);
+  const text = await resp.text();
+  const parsed = Papa.parse(text, {header:false, skipEmptyLines:true});
+  const results = new Map(); // index -> {lat,lng} or null
+  parsed.data.forEach(row=>{
+    const idx = parseInt(row[0], 10);
+    const matched = row[2] === 'Match';
+    if(matched && row[5]){
+      const [lon, lat] = row[5].split(',').map(parseFloat);
+      results.set(idx, {lat, lng:lon});
+    } else {
+      results.set(idx, null);
+    }
+  });
+  return results;
+}
+
+async function geocodeAddressNominatim(addrKey){
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=' + encodeURIComponent(addrKey);
+  try{
+    const resp = await fetch(url, {headers:{'Accept':'application/json'}});
+    const data = await resp.json();
+    if(data && data.length){
+      return {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), failed:false};
+    }
+    return {lat:null, lng:null, failed:true};
+  }catch(e){
+    return {lat:null, lng:null, failed:true};
+  }
+}
+
+async function geocodeAll(){
+  const toGeocode = [];
+  for(const colony of colonies){
+    const cached = await getCachedCoord(colony.addrKey);
+    if(cached && !cached.failed){
+      colony.lat = cached.lat;
+      colony.lng = cached.lng;
+    } else if(!cached){
+      toGeocode.push(colony);
+    }
+  }
+  applyFilters();
+  if(toGeocode.length===0) return;
+
+  geoStatusEl.classList.add('show');
+  geoText.textContent = 'Locating ' + toGeocode.length + ' new address' + (toGeocode.length===1?'':'es') + ' on the map\u2026';
+  geoBarFill.style.width = '0%';
+  geoPct.textContent = '0%';
+
+  let censusWorked = true;
+  const stillNeeded = [];
+  const BATCH_SIZE = 500;
+  let done = 0;
+
+  for(let start=0; start<toGeocode.length; start+=BATCH_SIZE){
+    const batch = toGeocode.slice(start, start+BATCH_SIZE);
+    if(censusWorked){
+      try{
+        const results = await geocodeBatchCensus(batch);
+        for(let i=0;i<batch.length;i++){
+          const r = results.get(i);
+          const colony = batch[i];
+          if(r){
+            colony.lat = r.lat; colony.lng = r.lng;
+            await setCachedCoord(colony.addrKey, {lat:r.lat, lng:r.lng, failed:false});
+          } else {
+            stillNeeded.push(colony);
+          }
+        }
+      }catch(e){
+        censusWorked = false;
+        batch.forEach(c=>stillNeeded.push(c));
+      }
+    } else {
+      batch.forEach(c=>stillNeeded.push(c));
+    }
+    done += batch.length;
+    const pct = Math.round((done/toGeocode.length)*70);
+    geoBarFill.style.width = pct + '%';
+    geoPct.textContent = pct + '%';
+    applyFilters();
+  }
+
+  // fallback for anything Census couldn't match
+  if(stillNeeded.length){
+    geoText.textContent = 'Double-checking ' + stillNeeded.length + ' address' + (stillNeeded.length===1?'':'es') + ' that needed a closer look\u2026';
+    for(let i=0;i<stillNeeded.length;i++){
+      const colony = stillNeeded[i];
+      const result = await geocodeAddressNominatim(colony.addrKey);
+      await setCachedCoord(colony.addrKey, result);
+      if(!result.failed){
+        colony.lat = result.lat;
+        colony.lng = result.lng;
+      }
+      const pct = 70 + Math.round(((i+1)/stillNeeded.length)*30);
+      geoBarFill.style.width = pct + '%';
+      geoPct.textContent = pct + '%';
+      if((i+1) % 5 === 0 || i === stillNeeded.length-1){
+        applyFilters();
+      }
+      await new Promise(r=>setTimeout(r, 1100));
+    }
+  }
+
+  geoStatusEl.classList.remove('show');
+  applyFilters();
+}
+
+renderList(colonies);
+geocodeAll();
+}
+
+initApp();
+</script>
+</body>
+</html>
