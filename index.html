@@ -59,6 +59,31 @@
   .stat .num{font-size:18px;font-weight:700;line-height:1.1;}
   .stat .lbl{font-size:11px;color:#cfe0d5;text-transform:uppercase;letter-spacing:0.4px;}
 
+  #viewtoggle{
+    display:flex;
+    gap:0;
+    background:var(--card);
+    border-bottom:1px solid var(--line);
+    padding:0 20px;
+  }
+  .view-btn{
+    background:none;
+    border:none;
+    border-bottom:3px solid transparent;
+    padding:10px 16px;
+    font-size:13.5px;
+    font-weight:600;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .view-btn.active{
+    color:var(--moss-dark);
+    border-bottom-color:var(--moss);
+  }
+  .view-btn:hover:not(.active){
+    color:var(--ink);
+  }
+
   #geostatus{
     background:var(--clay-light);
     color:#6b3a17;
@@ -241,6 +266,11 @@
     </div>
   </header>
 
+  <div id="viewtoggle">
+    <button class="view-btn active" id="view-completed-btn">Completed Colonies</button>
+    <button class="view-btn" id="view-waitlist-btn">Waitlist / Reported</button>
+  </div>
+
   <div id="geostatus">
     <span id="geotext">Locating addresses on the map&hellip;</span>
     <div id="geobar"><div id="geobar-fill"></div></div>
@@ -317,6 +347,32 @@
         </div>
         <button id="resetbtn">Reset filters</button>
       </div>
+
+      <div id="waitlist-filters" style="display:none;">
+        <div>
+          <span class="field-label">Search address or trapper</span>
+          <input type="text" id="wf-search" placeholder="e.g. Dottie, Illinois&hellip;">
+        </div>
+        <div class="row2">
+          <div>
+            <span class="field-label">Trapper</span>
+            <select id="wf-trapper">
+              <option value="">All</option>
+            </select>
+          </div>
+          <div>
+            <span class="field-label">Sort by</span>
+            <select id="wf-sort">
+              <option value="date-desc">Newest reported</option>
+              <option value="date-asc">Oldest reported</option>
+              <option value="total-desc">Most cats estimated</option>
+              <option value="addr-asc">Address A&ndash;Z</option>
+            </select>
+          </div>
+        </div>
+        <button id="wf-resetbtn">Reset filters</button>
+      </div>
+
       <div id="resultcount">Loading&hellip;</div>
       <div id="list"></div>
       <div id="needsloc" class="needs-loc" style="display:none;"></div>
@@ -333,6 +389,7 @@ const SHEET_ID = "1lYheC94CZjoCUpt6OaJVq9FP8sX60fwSMT65qjbS6LI";
 const SHEET_GID = "748217217";
 
 let RAW_RECORDS = [];
+let RAW_WAITLIST = [];
 
 function cleanSexJS(v){
   if(!v) return 'Unknown';
@@ -379,44 +436,77 @@ function parseDateJS(v){
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby0UeqBDukuxhMkXDyUf47L9YpBNRPs2LP25up0Rr4Qp_zxjlhFmiL4db7WB9b0yISK/exec";
 
+function mapCompletedRow(row, i){
+  const addrRaw = (row['Address']||'').toString().trim();
+  const zipRaw = (row['Zip']||'').toString().trim().replace(/\.0$/,'');
+  const addr = addrRaw || null;
+  const zip = zipRaw || null;
+  const addrKey = (addr && zip) ? (addr + ', ' + zip + ', KS') : null;
+  const latRaw = parseFloat(row['Lat']);
+  const lngRaw = parseFloat(row['Lng']);
+  const hasCoord = !isNaN(latRaw) && !isNaN(lngRaw) && latRaw !== 0 && lngRaw !== 0;
+  return {
+    id: i,
+    address: addr,
+    zip: zip,
+    addrKey: addrKey,
+    lat: hasCoord ? latRaw : null,
+    lng: hasCoord ? lngRaw : null,
+    date: parseDateJS(row['Date']),
+    trapNumber: (row['TrapNumber']||'').toString().trim() || null,
+    sex: cleanSexJS(row['Sex']),
+    ageClass: cleanAgeJS(row['AgeClass']),
+    mass: (row['Mass']||'').toString().trim() || null,
+    description: (row['Cat Description']||'').toString().trim() || null,
+    fixedBy: cleanOrgJS(row['Who Fixed Cat?']),
+    notes: (row['Notes']||'').toString().trim() || null
+  };
+}
+
+function mapWaitlistRow(row, i){
+  const addrRaw = (row['Address']||'').toString().trim();
+  const zipRaw = (row['Zip']||'').toString().trim().replace(/\.0$/,'');
+  const addr = addrRaw || null;
+  const zip = zipRaw || null;
+  const addrKey = (addr && zip) ? (addr + ', ' + zip + ', KS') : null;
+  const latRaw = parseFloat(row['Lat']);
+  const lngRaw = parseFloat(row['Lng']);
+  const hasCoord = !isNaN(latRaw) && !isNaN(lngRaw) && latRaw !== 0 && lngRaw !== 0;
+  return {
+    id: i,
+    reportId: (row['ID']||'').toString().trim() || null,
+    address: addr,
+    zip: zip,
+    addrKey: addrKey,
+    lat: hasCoord ? latRaw : null,
+    lng: hasCoord ? lngRaw : null,
+    date: parseDateJS(row['Date']),
+    trapper: (row['Trapper']||'').toString().trim() || null,
+    total: (row['Total']!==undefined && row['Total']!=='') ? row['Total'] : null,
+    easy: (row['Easy']||'').toString().trim() || null,
+    comments: (row['Comments']||'').toString().trim() || null,
+    status: (row['Status']||'Pending').toString().trim() || 'Pending'
+  };
+}
+
 async function loadData(){
   try{
     const res = await fetch(APPS_SCRIPT_URL);
-    if(!res.ok){ console.error('Cat map: Apps Script returned status', res.status); return []; }
-    const rows = await res.json();
-    if(!Array.isArray(rows) || rows.length === 0){ console.error('Cat map: Apps Script returned no rows'); return []; }
-    const records = [];
-    rows.forEach((row, i)=>{
-      const addrRaw = (row['Address']||'').toString().trim();
-      const zipRaw = (row['Zip']||'').toString().trim().replace(/\.0$/,'');
-      const addr = addrRaw || null;
-      const zip = zipRaw || null;
-      const addrKey = (addr && zip) ? (addr + ', ' + zip + ', KS') : null;
-      const latRaw = parseFloat(row['Lat']);
-      const lngRaw = parseFloat(row['Lng']);
-      const hasCoord = !isNaN(latRaw) && !isNaN(lngRaw) && latRaw !== 0 && lngRaw !== 0;
-      records.push({
-        id: i,
-        address: addr,
-        zip: zip,
-        addrKey: addrKey,
-        lat: hasCoord ? latRaw : null,
-        lng: hasCoord ? lngRaw : null,
-        date: parseDateJS(row['Date']),
-        trapNumber: (row['TrapNumber']||'').toString().trim() || null,
-        sex: cleanSexJS(row['Sex']),
-        ageClass: cleanAgeJS(row['AgeClass']),
-        mass: (row['Mass']||'').toString().trim() || null,
-        description: (row['Cat Description']||'').toString().trim() || null,
-        fixedBy: cleanOrgJS(row['Who Fixed Cat?']),
-        notes: (row['Notes']||'').toString().trim() || null
-      });
-    });
-    console.log('Cat map: loaded', records.length, 'records from Apps Script');
-    return records;
+    if(!res.ok){ console.error('Cat map: Apps Script returned status', res.status); return {completed:[], waitlist:[]}; }
+    const data = await res.json();
+    const completedRows = Array.isArray(data.completed) ? data.completed : [];
+    const waitlistRows = Array.isArray(data.waitlist) ? data.waitlist : [];
+    if(completedRows.length === 0 && waitlistRows.length === 0){
+      console.error('Cat map: Apps Script returned no rows in either dataset');
+      return {completed:[], waitlist:[]};
+    }
+    const completed = completedRows.map(mapCompletedRow);
+    const waitlist = waitlistRows.map(mapWaitlistRow);
+    console.log('Cat map: loaded', completed.length, 'completed records and', waitlist.length, 'waitlist records');
+    return {completed, waitlist};
   }catch(e){
     console.error('Cat map: failed to load from Apps Script', e.message);
-    return [];
+    return {completed:[], waitlist:[]};
   }
 }
 
@@ -424,8 +514,10 @@ async function loadData(){
 // ---- group into colonies by address key ----
 async function initApp(){
 document.getElementById('resultcount').textContent = 'Loading data from Google Sheet…';
-RAW_RECORDS = await loadData();
-if(RAW_RECORDS.length === 0){
+const loaded = await loadData();
+RAW_RECORDS = loaded.completed;
+RAW_WAITLIST = loaded.waitlist;
+if(RAW_RECORDS.length === 0 && RAW_WAITLIST.length === 0){
   document.getElementById('resultcount').textContent = 'No data loaded.';
   document.getElementById('loaderror').style.display = 'block';
   return;
@@ -449,6 +541,26 @@ function buildColonies(records){
   return {colonies:Array.from(map.values()), noLoc};
 }
 const {colonies, noLoc} = buildColonies(RAW_RECORDS);
+
+function buildWaitlistEntries(records){
+  const map = new Map();
+  const noLoc = [];
+  records.forEach(r=>{
+    if(r.status && r.status.toLowerCase() === 'completed') return; // hide graduated reports
+    if(!r.addrKey){ noLoc.push(r); return; }
+    if(!map.has(r.addrKey)){
+      map.set(r.addrKey, {addrKey:r.addrKey, address:r.address, zip:r.zip, reports:[], lat:null, lng:null});
+    }
+    const entry = map.get(r.addrKey);
+    entry.reports.push(r);
+    if(entry.lat==null && r.lat!=null && r.lng!=null){
+      entry.lat = r.lat;
+      entry.lng = r.lng;
+    }
+  });
+  return {waitlistEntries:Array.from(map.values()), noLoc};
+}
+const {waitlistEntries, noLoc: waitlistNoLoc} = buildWaitlistEntries(RAW_WAITLIST);
 
 document.getElementById('stat-cats').textContent = RAW_RECORDS.length.toLocaleString();
 document.getElementById('stat-colonies').textContent = colonies.length.toLocaleString();
@@ -478,6 +590,8 @@ years.forEach(y=>{
 });
 
 // ---- map setup ----
+let currentView = 'completed';
+
 const map = L.map('map', {zoomControl:true}).setView([39.05, -95.68], 11);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom:19,
@@ -487,7 +601,11 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 const clusterGroup = L.markerClusterGroup({maxClusterRadius:45});
 map.addLayer(clusterGroup);
 
+const waitlistClusterGroup = L.markerClusterGroup({maxClusterRadius:45});
+// not added to map until the user switches views
+
 const markerByAddrKey = {};
+const markerByAddrKeyWaitlist = {};
 
 function sexPillClass(sex){
   if(sex==='Male') return 'pill-male';
@@ -524,6 +642,37 @@ function renderMarkers(list){
   });
 }
 
+function popupHtmlWaitlist(entry){
+  let html = '<div class="popup-title">' + entry.address + '</div>';
+  html += '<div class="popup-sub">' + entry.reports.length + ' report' + (entry.reports.length===1?'':'s') + ' at this location</div>';
+  html += '<div class="popup-list">';
+  entry.reports.slice().sort((a,b)=> (b.date||'').localeCompare(a.date||'')).forEach(r=>{
+    html += '<div class="popup-cat">';
+    if(r.total!=null && r.total!=='') html += '<span class="cat-pill pill-unk">~' + r.total + ' cats</span>';
+    if(r.easy) html += '<span class="cat-pill pill-male">Easy</span>';
+    html += '<br>';
+    html += '<span style="color:#8a8578;">' + (r.date||'date unknown') + (r.trapper? ' &middot; assigned to '+r.trapper : '') + '</span>';
+    if(r.comments){ html += '<br><span style="color:#8a4a24;">' + r.comments + '</span>'; }
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderWaitlistMarkers(list){
+  waitlistClusterGroup.clearLayers();
+  list.forEach(entry=>{
+    if(entry.lat==null || entry.lng==null) return;
+    const marker = L.circleMarker([entry.lat, entry.lng], {
+      radius:9, color:'#b6602f', weight:2, fillColor:'#e08a4f', fillOpacity:0.9
+    });
+    marker.bindPopup(popupHtmlWaitlist(entry));
+    marker._addrKey = entry.addrKey;
+    markerByAddrKeyWaitlist[entry.addrKey] = marker;
+    waitlistClusterGroup.addLayer(marker);
+  });
+}
+
 // ---- list rendering ----
 const listEl = document.getElementById('list');
 let activeCard = null;
@@ -549,6 +698,41 @@ function renderList(list){
         if(m){
           if(clusterGroup.hasLayer(m)){
             clusterGroup.zoomToShowLayer(m, ()=> m.openPopup());
+          } else {
+            m.openPopup();
+          }
+        }
+      }
+      if(window.innerWidth <= 760) document.getElementById('sidebar').classList.remove('open');
+    });
+    listEl.appendChild(card);
+  });
+}
+
+let activeWaitlistCard = null;
+
+function renderWaitlistList(list){
+  listEl.innerHTML = '';
+  document.getElementById('stat-shown').textContent = list.length.toLocaleString();
+  document.getElementById('resultcount').textContent = list.length.toLocaleString() + ' pending location' + (list.length===1?'':'s') + ' shown';
+  list.forEach(entry=>{
+    const card = document.createElement('div');
+    card.className = 'colony-card';
+    const lastDate = entry.reports.reduce((max,r)=> (r.date && r.date>max) ? r.date : max, '');
+    const trappers = Array.from(new Set(entry.reports.map(r=>r.trapper).filter(Boolean))).join(', ');
+    card.innerHTML = '<div class="colony-addr">' + entry.address +
+      '<span class="colony-count">' + entry.reports.length + '</span></div>' +
+      '<div class="colony-meta">' + entry.zip + (lastDate? ' &middot; reported ' + lastDate : '') + (trappers? ' &middot; ' + trappers : '') + '</div>';
+    card.addEventListener('click', ()=>{
+      if(activeWaitlistCard) activeWaitlistCard.classList.remove('active');
+      card.classList.add('active');
+      activeWaitlistCard = card;
+      if(entry.lat!=null){
+        map.setView([entry.lat, entry.lng], 16, {animate:true});
+        const m = markerByAddrKeyWaitlist[entry.addrKey];
+        if(m){
+          if(waitlistClusterGroup.hasLayer(m)){
+            waitlistClusterGroup.zoomToShowLayer(m, ()=> m.openPopup());
           } else {
             m.openPopup();
           }
@@ -604,8 +788,10 @@ function applyFilters(){
   else if(f.sort==='count-desc') filtered.sort((a,b)=> b.cats.length - a.cats.length);
   else if(f.sort==='addr-asc') filtered.sort((a,b)=> a.address.localeCompare(b.address));
 
-  renderMarkers(filtered);
-  renderList(filtered);
+  if(currentView === 'completed'){
+    renderMarkers(filtered);
+    renderList(filtered);
+  }
 }
 
 ['f-search','f-sex','f-age','f-org','f-year','f-datefrom','f-dateto','f-sort'].forEach(id=>{
@@ -623,6 +809,104 @@ document.getElementById('resetbtn').addEventListener('click', ()=>{
   document.getElementById('f-sort').value='date-desc';
   applyFilters();
 });
+
+// ---- waitlist filtering ----
+const trapperSel = document.getElementById('wf-trapper');
+function populateTrapperOptions(){
+  const trappers = Array.from(new Set(RAW_WAITLIST.map(r=>r.trapper).filter(Boolean))).sort();
+  trapperSel.innerHTML = '<option value="">All</option>';
+  trappers.forEach(t=>{
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    trapperSel.appendChild(opt);
+  });
+}
+
+function currentWaitlistFilters(){
+  return {
+    search: document.getElementById('wf-search').value.trim().toLowerCase(),
+    trapper: document.getElementById('wf-trapper').value,
+    sort: document.getElementById('wf-sort').value
+  };
+}
+
+function applyWaitlistFilters(){
+  const f = currentWaitlistFilters();
+  let filtered = waitlistEntries.map(entry=>{
+    const reports = entry.reports.filter(r=>{
+      if(f.trapper && r.trapper !== f.trapper) return false;
+      return true;
+    });
+    return {...entry, reports};
+  }).filter(entry=>{
+    if(entry.reports.length===0) return false;
+    if(f.search){
+      const hay = (entry.address + ' ' + entry.reports.map(r=>r.trapper||'').join(' ')).toLowerCase();
+      if(!hay.includes(f.search)) return false;
+    }
+    return true;
+  });
+
+  if(f.sort==='date-desc') filtered.sort((a,b)=>{
+    const da = a.reports.reduce((m,r)=>r.date>m?r.date:m,''); const db = b.reports.reduce((m,r)=>r.date>m?r.date:m,'');
+    return db.localeCompare(da);
+  });
+  else if(f.sort==='date-asc') filtered.sort((a,b)=>{
+    const da = a.reports.reduce((m,r)=>(!m||r.date<m)?r.date:m,'9999'); const db = b.reports.reduce((m,r)=>(!m||r.date<m)?r.date:m,'9999');
+    return da.localeCompare(db);
+  });
+  else if(f.sort==='total-desc') filtered.sort((a,b)=>{
+    const ta = a.reports.reduce((s,r)=> s + (parseFloat(r.total)||0), 0);
+    const tb = b.reports.reduce((s,r)=> s + (parseFloat(r.total)||0), 0);
+    return tb - ta;
+  });
+  else if(f.sort==='addr-asc') filtered.sort((a,b)=> a.address.localeCompare(b.address));
+
+  if(currentView === 'waitlist'){
+    renderWaitlistMarkers(filtered);
+    renderWaitlistList(filtered);
+  }
+}
+
+['wf-search','wf-trapper','wf-sort'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', applyWaitlistFilters);
+  document.getElementById(id).addEventListener('change', applyWaitlistFilters);
+});
+document.getElementById('wf-resetbtn').addEventListener('click', ()=>{
+  document.getElementById('wf-search').value='';
+  document.getElementById('wf-trapper').value='';
+  document.getElementById('wf-sort').value='date-desc';
+  applyWaitlistFilters();
+});
+
+// ---- view toggle ----
+function switchView(view){
+  currentView = view;
+  const completedBtn = document.getElementById('view-completed-btn');
+  const waitlistBtn = document.getElementById('view-waitlist-btn');
+  const completedFilters = document.getElementById('filters');
+  const waitlistFilters = document.getElementById('waitlist-filters');
+
+  if(view === 'completed'){
+    completedBtn.classList.add('active');
+    waitlistBtn.classList.remove('active');
+    completedFilters.style.display = '';
+    waitlistFilters.style.display = 'none';
+    if(map.hasLayer(waitlistClusterGroup)) map.removeLayer(waitlistClusterGroup);
+    if(!map.hasLayer(clusterGroup)) map.addLayer(clusterGroup);
+    applyFilters();
+  } else {
+    waitlistBtn.classList.add('active');
+    completedBtn.classList.remove('active');
+    completedFilters.style.display = 'none';
+    waitlistFilters.style.display = '';
+    if(map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
+    if(!map.hasLayer(waitlistClusterGroup)) map.addLayer(waitlistClusterGroup);
+    applyWaitlistFilters();
+  }
+}
+document.getElementById('view-completed-btn').addEventListener('click', ()=> switchView('completed'));
+document.getElementById('view-waitlist-btn').addEventListener('click', ()=> switchView('waitlist'));
 
 document.getElementById('togglesidebar').addEventListener('click', ()=>{
   document.getElementById('sidebar').classList.toggle('open');
@@ -664,18 +948,18 @@ async function geocodeAddressNominatim(addrKey){
   }
 }
 
-async function geocodeAll(){
+async function geocodeList(list, onProgress){
   const toGeocode = [];
-  for(const colony of colonies){
-    const cached = await getCachedCoord(colony.addrKey);
+  for(const item of list){
+    const cached = await getCachedCoord(item.addrKey);
     if(cached && !cached.failed){
-      colony.lat = cached.lat;
-      colony.lng = cached.lng;
+      item.lat = cached.lat;
+      item.lng = cached.lng;
     } else if(!cached){
-      toGeocode.push(colony);
+      toGeocode.push(item);
     }
   }
-  applyFilters();
+  onProgress();
   if(toGeocode.length===0) return;
 
   geoStatusEl.classList.add('show');
@@ -684,28 +968,34 @@ async function geocodeAll(){
   geoPct.textContent = '0%';
 
   for(let i=0;i<toGeocode.length;i++){
-    const colony = toGeocode[i];
-    const result = await geocodeAddressNominatim(colony.addrKey);
-    await setCachedCoord(colony.addrKey, result);
+    const item = toGeocode[i];
+    const result = await geocodeAddressNominatim(item.addrKey);
+    await setCachedCoord(item.addrKey, result);
     if(!result.failed){
-      colony.lat = result.lat;
-      colony.lng = result.lng;
+      item.lat = result.lat;
+      item.lng = result.lng;
     }
     const pct = Math.round(((i+1)/toGeocode.length)*100);
     geoBarFill.style.width = pct + '%';
     geoPct.textContent = pct + '%';
     if((i+1) % 5 === 0 || i === toGeocode.length-1){
-      applyFilters();
+      onProgress();
     }
     await new Promise(r=>setTimeout(r, 1100));
   }
 
   geoStatusEl.classList.remove('show');
-  applyFilters();
+  onProgress();
 }
 
+async function geocodeAllData(){
+  await geocodeList(colonies, applyFilters);
+  await geocodeList(waitlistEntries, applyWaitlistFilters);
+}
+
+populateTrapperOptions();
 renderList(colonies);
-geocodeAll();
+geocodeAllData();
 }
 
 initApp();
